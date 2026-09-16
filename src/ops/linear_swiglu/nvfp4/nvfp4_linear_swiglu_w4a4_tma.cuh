@@ -46,17 +46,30 @@ template <class Geometry, class Schedule>
 __global__ __launch_bounds__(
     Schedule::kThreads,
     Schedule::
-        kMinBlocksPerSm) void nvfp4_linear_swiglu_w4a4_tma_kernel(const __grid_constant__
-                                                                      Nvfp4W4a4TmaDescriptors
-                                                                          descriptors,
-                                                                  float alpha,
-                                                                  __nv_bfloat16* __restrict__ output) {
+        kMinBlocksPerSm)
+#if defined(_MSC_VER)
+// MSVC rejects an over-aligned (alignas(128)) by-value kernel parameter (C2711), so the
+// descriptors travel as a device pointer there; every other compiler keeps the
+// __grid_constant__ by-value parameter. The reference below gives the body one spelling.
+void nvfp4_linear_swiglu_w4a4_tma_kernel(const Nvfp4W4a4TmaDescriptors* descriptors_parameter,
+                                         float alpha, __nv_bfloat16* __restrict__ output) {
+#else
+void nvfp4_linear_swiglu_w4a4_tma_kernel(
+    const __grid_constant__ Nvfp4W4a4TmaDescriptors descriptors_parameter, float alpha,
+    __nv_bfloat16* __restrict__ output) {
+#endif
     static_assert(Geometry::kOutputRows == 34816);
     static_assert(Geometry::kInputRows == 5120);
     static_assert((Geometry::kInputRows % Schedule::kBlockK) == 0);
     static_assert(Schedule::kBlockN == 128);
     static_assert(Schedule::kWarpsN == 2);
     static_assert(Schedule::kMmaN == 8);
+
+#if defined(_MSC_VER)
+    const Nvfp4W4a4TmaDescriptors& descriptors = *descriptors_parameter;
+#else
+    const Nvfp4W4a4TmaDescriptors& descriptors = descriptors_parameter;
+#endif
 
     constexpr int kIntermediate = Geometry::kOutputRows / 2;
     constexpr int kPairN        = Schedule::kBlockN / 2;

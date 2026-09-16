@@ -22,16 +22,41 @@
         "BUILD_TESTING": "ON",
         "NINFER_BUILD_BENCHMARKS": "ON"
       }
+    },
+    {
+      "name": "windows",
+      "displayName": "Windows release products (MSVC, vcpkg)",
+      "description": "Resolves FFmpeg and libcurl from vcpkg.json in manifest mode. Run from a Developer Command Prompt so nvcc finds cl.exe; set VCPKG_ROOT to the vcpkg checkout.",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build-win",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "windows-dev",
+      "displayName": "Windows products, tests and benchmarks (MSVC, vcpkg)",
+      "inherits": "windows",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "NINFER_BUILD_BENCHMARKS": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "release", "configurePreset": "release" },
-    { "name": "dev", "configurePreset": "dev" }
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "windows", "configurePreset": "windows" },
+    { "name": "windows-dev", "configurePreset": "windows-dev" }
   ],
   "testPresets": [
     {
       "name": "dev",
       "configurePreset": "dev",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-dev",
+      "configurePreset": "windows-dev",
       "output": { "outputOnFailure": true }
     }
   ]

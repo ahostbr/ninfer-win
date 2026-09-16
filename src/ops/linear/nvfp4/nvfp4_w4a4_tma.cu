@@ -72,12 +72,33 @@ void launch_tma(const std::uint8_t* activation_codes, const std::uint8_t* activa
     }();
     (void)kConfigured;
 
+#if defined(_MSC_VER)
+    // MSVC cannot take the over-aligned descriptors as a by-value kernel parameter (C2711),
+    // so they are staged in device memory and passed by pointer. cudaMallocAsync keeps the
+    // alloc-copy-launch-free cycle stream-ordered and the stream pool reuses the same slot on
+    // subsequent launches.
+    // ponytail: one small H2D copy per launch on Windows; hoist into a per-stream scratch
+    // buffer if it ever shows up in a decode profile.
+    Nvfp4W4a4TmaDescriptors* device_descriptors = nullptr;
+    CUDA_CHECK(cudaMallocAsync(&device_descriptors, sizeof(Nvfp4W4a4TmaDescriptors), stream));
+    CUDA_CHECK(cudaMemcpyAsync(device_descriptors, &descriptors, sizeof(Nvfp4W4a4TmaDescriptors),
+                               cudaMemcpyHostToDevice, stream));
+#endif
+
     // The last M tile may be partial; the kernel bounds itself by the real token count.
     const dim3 grid(Geometry::kOutputRows / Schedule::kBlockN,
                     (tokens + Schedule::kBlockM - 1) / Schedule::kBlockM);
+#if defined(_MSC_VER)
+    nvfp4_w4a4_tma_kernel<Geometry, Schedule><<<grid, Schedule::kThreads, kSharedBytes, stream>>>(
+        device_descriptors, alpha, epilogue, output, tokens);
+#else
     nvfp4_w4a4_tma_kernel<Geometry, Schedule><<<grid, Schedule::kThreads, kSharedBytes, stream>>>(
         descriptors, alpha, epilogue, output, tokens);
+#endif
     CUDA_CHECK(cudaGetLastError());
+#if defined(_MSC_VER)
+    CUDA_CHECK(cudaFreeAsync(device_descriptors, stream));
+#endif
 }
 
 template <class Geometry, class Schedule = TmaM256N128>

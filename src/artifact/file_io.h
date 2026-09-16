@@ -24,9 +24,17 @@ public:
 
 private:
     std::filesystem::path path_;
+#if defined(_WIN32)
+    // Win32 HANDLE, held as void* so this header never pulls in windows.h. A closed handle
+    // is always nullptr here: the constructor normalizes INVALID_HANDLE_VALUE away, so the
+    // destructor has one sentinel to test rather than two.
+    void* fd_                = nullptr;
+    mutable void* direct_fd_ = nullptr;
+#else
     int fd_                = -1;
     mutable int direct_fd_ = -1;
-    std::uint64_t bytes_   = 0;
+#endif
+    std::uint64_t bytes_ = 0;
 };
 
 } // namespace ninfer::artifact

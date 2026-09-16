@@ -28,11 +28,12 @@ the weights again.
 
 ## Quick start
 
-NInfer requires 64-bit Linux, an NVIDIA GeForce RTX 5090, a CUDA toolkit supporting `sm_120a`,
-CMake 3.28 or newer, a C++20 host compiler, Ninja, `pkg-config`, FFmpeg development libraries
-(`libavformat`, `libavcodec`, `libavutil`, and `libswscale`), and `libcurl >= 7.85`.
-CUDA 13.1 is the validated development toolkit; CMake does not impose a CUDA version floor.
-The build rejects CUDA architectures other than `sm_120a`.
+NInfer requires 64-bit Linux or Windows, an NVIDIA GeForce RTX 5090, a CUDA toolkit supporting
+`sm_120a`, CMake 3.28 or newer, a C++20 host compiler, and Ninja. On Linux it also needs
+`pkg-config`, FFmpeg development libraries (`libavformat`, `libavcodec`, `libavutil`, and
+`libswscale`), and `libcurl >= 7.85`; on Windows those two dependencies come from vcpkg (see
+below) and the host compiler is MSVC. CUDA 13.1 is the validated development toolkit; CMake does
+not impose a CUDA version floor. The build rejects CUDA architectures other than `sm_120a`.
 
 Build the product binaries:
 
@@ -53,6 +54,27 @@ See [build organization and configuration](docs/maintainer/build-system.md) for 
 There is no install target or packaged binary distribution; run NInfer from its source build tree.
 Python tools run independently of CMake; the standalone HBM probe has its own
 [build command](tools/README.md#standalone-hbm-probe).
+
+### Windows (MSVC)
+
+FFmpeg and `libcurl` (Schannel TLS) are declared in `vcpkg.json` and resolved by the vcpkg
+toolchain in manifest mode, so no prebuilt media packages are needed. Configure from a
+**Developer Command Prompt for VS 2022** — `nvcc` needs `cl.exe` on `PATH`:
+
+```powershell
+# One-time, or point VCPKG_ROOT at an existing vcpkg installation
+git clone https://github.com/microsoft/vcpkg.git
+.cpkgootstrap-vcpkg.bat
+$env:VCPKG_ROOT = "$PWDcpkg"
+
+cmake --preset windows
+cmake --build --preset windows
+```
+
+The `windows` preset builds the products into `build-win/`; `windows-dev` adds tests and
+benchmarks. On the first configuration vcpkg builds FFmpeg and curl from source (roughly fifteen
+minutes); later configurations restore them from the local binary cache in seconds.
+
 
 Download the artifact used by this example with the Hugging Face CLI:
 

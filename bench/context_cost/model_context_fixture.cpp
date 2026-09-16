@@ -7,6 +7,7 @@
 #include "core/layout.h"
 #include "core/paged_kv_cache.h"
 #include "ninfer/engine.h"
+#include "runtime/contract/resources.h"
 
 #include <cuda_runtime.h>
 
@@ -396,13 +397,10 @@ std::vector<TextCase> text_cases(std::uint32_t chunk) {
     };
 }
 
+// Same definition the runtime uses, so the fixture and the engine cannot drift. The shared
+// helper saturates at max(uint64) rather than overflowing, so no range check is possible here.
 std::uint64_t attention_pairs(std::uint32_t prefix, std::uint32_t suffix) {
-    const unsigned __int128 pairs = static_cast<unsigned __int128>(prefix) * suffix +
-                                    static_cast<unsigned __int128>(suffix) * (suffix + 1ULL) / 2U;
-    if (pairs > std::numeric_limits<std::uint64_t>::max()) {
-        throw std::overflow_error("prefill attention-pair count exceeds uint64");
-    }
-    return static_cast<std::uint64_t>(pairs);
+    return ninfer::runtime::attention_pairs(prefix, suffix);
 }
 
 std::vector<std::uint8_t> block_ppm(int width, int height, std::uint8_t value) {

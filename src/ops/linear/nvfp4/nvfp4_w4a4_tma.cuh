@@ -184,12 +184,30 @@ __device__ __forceinline__ void nvfp4_tma_load_2d(void* destination, const CUten
 template <class Geometry, class Schedule, class Epilogue, class OutputPolicy>
 __global__
 __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_w4a4_tma_kernel(
-    const __grid_constant__ Nvfp4W4a4TmaDescriptors descriptors, float alpha,
-    const __grid_constant__ Epilogue epilogue, const __grid_constant__ OutputPolicy output,
-    int token_count) {
+#if defined(_MSC_VER)
+    // MSVC rejects an over-aligned (alignas(128)) by-value kernel parameter (C2711), so the
+    // descriptors travel as a device pointer there; every other compiler keeps the
+    // __grid_constant__ by-value parameter. The reference below gives the body one spelling.
+    const Nvfp4W4a4TmaDescriptors* descriptors_parameter,
+#else
+    const __grid_constant__ Nvfp4W4a4TmaDescriptors descriptors_parameter,
+#endif
+    float alpha, const __grid_constant__ Epilogue epilogue,
+    const __grid_constant__ OutputPolicy output, int token_count) {
+#if defined(_MSC_VER)
+    const Nvfp4W4a4TmaDescriptors& descriptors = *descriptors_parameter;
+#else
+    const Nvfp4W4a4TmaDescriptors& descriptors = descriptors_parameter;
+#endif
     static_assert((Geometry::kInputRows % Schedule::kBlockK) == 0);
     static_assert((Geometry::kOutputRows % Schedule::kBlockN) == 0);
     static_assert(Schedule::kStages >= 2, "the activation-scale buffer needs two slots");
+
+#if defined(_MSC_VER)
+    const Nvfp4W4a4TmaDescriptors& tma = *descriptors;
+#else
+    const Nvfp4W4a4TmaDescriptors& tma = descriptors;
+#endif
 
     extern __shared__ __align__(128) unsigned char shared_bytes[];
     auto& shared = *reinterpret_cast<Nvfp4W4a4TmaSharedStorage<Schedule>*>(shared_bytes);

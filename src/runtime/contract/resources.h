@@ -1,6 +1,7 @@
 #pragma once
 
 #include "runtime/contract/request.h"
+#include "core/math_util.h"
 #include "core/transfer_work.h"
 #include <array>
 #include <cstddef>
@@ -23,8 +24,32 @@ struct PrefillWork {
     [[nodiscard]] friend constexpr bool operator==(PrefillWork, PrefillWork) noexcept = default;
 };
 
-// Exact prefill feature definition for a suffix beginning after prefix_tokens. Attention work is
-// prefix*suffix + suffix*(suffix+1)/2 and all arithmetic saturates.
+// Causal attention pairs for a suffix beginning after prefix_tokens:
+// prefix*suffix + suffix*(suffix+1)/2, saturating. The exact value needs 128 bits, so it is
+// accumulated in two 64-bit limbs; MSVC has no __int128 and one arithmetic beats two.
+[[nodiscard]] inline std::uint64_t attention_pairs(std::uint64_t prefix_tokens,
+                                                   std::uint64_t suffix_tokens) noexcept {
+    constexpr std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+    // suffix+1 would wrap, and the triangular term alone already exceeds 64 bits here.
+    if (suffix_tokens == maximum) { return maximum; }
+
+    std::uint64_t linear_high      = 0;
+    const std::uint64_t linear_low = core::u128_mul(prefix_tokens, suffix_tokens, &linear_high);
+
+    // One of suffix and suffix+1 is even, so halving the full 128-bit product is exact.
+    std::uint64_t triangular_high = 0;
+    std::uint64_t triangular_low =
+        core::u128_mul(suffix_tokens, suffix_tokens + 1U, &triangular_high);
+    triangular_low  = (triangular_low >> 1U) | (triangular_high << 63U);
+    triangular_high >>= 1U;
+
+    const std::uint64_t sum_low = linear_low + triangular_low;
+    const std::uint64_t sum_high =
+        linear_high + triangular_high + (sum_low < linear_low ? 1U : 0U);
+    return sum_high != 0 ? maximum : sum_low;
+}
+
+// Exact prefill feature definition for a suffix beginning after prefix_tokens.
 [[nodiscard]] inline PrefillWork make_prefill_work(std::uint64_t prefix_tokens,
                                                    std::uint64_t suffix_tokens,
                                                    std::uint64_t vision_items,
@@ -33,18 +58,10 @@ struct PrefillWork {
     PrefillWork result;
     result.chunks =
         suffix_tokens == 0 || prefill_chunk == 0 ? 0 : 1U + (suffix_tokens - 1U) / prefill_chunk;
-    result.tokens                       = suffix_tokens;
-    result.vision_items                 = vision_items;
-    result.vision_patches               = vision_patches;
-    const unsigned __int128 suffix      = suffix_tokens;
-    const unsigned __int128 linear      = static_cast<unsigned __int128>(prefix_tokens) * suffix;
-    const unsigned __int128 triangular  = suffix * (suffix + 1U) / 2U;
-    constexpr unsigned __int128 maximum = ~static_cast<unsigned __int128>(0);
-    const unsigned __int128 attention =
-        triangular > maximum - linear ? maximum : linear + triangular;
-    result.attention_pairs = attention > std::numeric_limits<std::uint64_t>::max()
-                                 ? std::numeric_limits<std::uint64_t>::max()
-                                 : static_cast<std::uint64_t>(attention);
+    result.tokens          = suffix_tokens;
+    result.vision_items    = vision_items;
+    result.vision_patches  = vision_patches;
+    result.attention_pairs = attention_pairs(prefix_tokens, suffix_tokens);
     return result;
 }
 

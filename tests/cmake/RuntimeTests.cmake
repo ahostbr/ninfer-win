@@ -1,3 +1,7 @@
+ninfer_add_test(ninfer_attention_pairs_test
+  SOURCES "${CMAKE_CURRENT_LIST_DIR}/../test_attention_pairs.cpp"
+  LIBRARIES ninfer_runtime_support)
+
 ninfer_add_test(ninfer_admission_policy_test SOURCES "${CMAKE_CURRENT_LIST_DIR}/../test_admission_policy.cpp"
   LIBRARIES ninfer_runtime_support)
 
