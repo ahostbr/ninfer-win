@@ -77,6 +77,13 @@ void compare_against_oracle() {
     // An odd suffix, where the halving must come from the 128-bit product and not the operand.
     expect_eq(ninfer::runtime::attention_pairs(0, (1ULL << 32U) - 1),
               9'223'372'034'707'292'160ULL, 0, (1ULL << 32U) - 1);
+    // The only shape that exercises the carry-in: suffix*(suffix+1) needs 65 bits (high limb 1),
+    // but halving brings it back under 64, so the shifted-in bit is the whole answer. Without
+    // "| (triangular_high << 63)" this returns 2^31 instead.
+    expect_eq(ninfer::runtime::attention_pairs(0, 1ULL << 32U), 9'223'372'039'002'259'456ULL, 0,
+              1ULL << 32U);
+    expect_eq(ninfer::runtime::attention_pairs(1, 1ULL << 32U), 9'223'372'043'297'226'752ULL, 1,
+              1ULL << 32U);
     std::cout << "compared fixed oracle-derived expectations (no __int128 on this compiler)\n";
 }
 
