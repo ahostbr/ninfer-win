@@ -1,3 +1,9 @@
+> **⚠️ UNOFFICIAL WINDOWS FORK.** Upstream is
+> [Neroued/ninfer](https://github.com/Neroued/ninfer) (Apache-2.0); this fork only adds a native
+> Windows build and is not affiliated with or endorsed by that project. It carries a **known
+> defect on the default NVFP4 prefill path** and no model has been run end to end on it yet.
+> Read [FORK.md](FORK.md) before using it.
+
 # NInfer
 
 > Selected checkpoints. Maximum single-GPU inference performance.
