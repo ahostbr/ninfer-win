@@ -203,12 +203,6 @@ __launch_bounds__(Schedule::kThreads, Schedule::kMinBlocksPerSm) void nvfp4_w4a4
     static_assert((Geometry::kOutputRows % Schedule::kBlockN) == 0);
     static_assert(Schedule::kStages >= 2, "the activation-scale buffer needs two slots");
 
-#if defined(_MSC_VER)
-    const Nvfp4W4a4TmaDescriptors& tma = *descriptors;
-#else
-    const Nvfp4W4a4TmaDescriptors& tma = descriptors;
-#endif
-
     extern __shared__ __align__(128) unsigned char shared_bytes[];
     auto& shared = *reinterpret_cast<Nvfp4W4a4TmaSharedStorage<Schedule>*>(shared_bytes);
     int block_x  = 0;
