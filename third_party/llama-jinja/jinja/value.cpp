@@ -8,8 +8,23 @@
 #include <vector>
 #include <optional>
 #include <algorithm>
+#include <ctime>
 
 namespace jinja {
+namespace {
+
+// localtime_r is POSIX. The MSVC spelling takes its arguments in the OPPOSITE order and
+// returns errno_t rather than a pointer, so the order and the success test have to be
+// adapted together; getting either half alone still compiles.
+inline bool localtime_into(std::tm* out, const std::time_t* when) {
+#if defined(_WIN32)
+    return ::localtime_s(out, when) == 0;
+#else
+    return ::localtime_r(when, out) != nullptr;
+#endif
+}
+
+} // namespace
 
 // func_args method implementations
 
@@ -272,7 +287,7 @@ const func_builtins& global_builtins() {
              args.ensure_vals<value_string>();
              std::string format = args.get_pos(0)->as_string().str();
              std::tm local{};
-             if (!localtime_r(&args.ctx.current_time, &local)) {
+             if (!localtime_into(&local, &args.ctx.current_time)) {
                  throw raised_exception("strftime_now: invalid time");
              }
              if (format.empty()) return mk_val<value_string>("");

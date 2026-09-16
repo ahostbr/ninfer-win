@@ -68,7 +68,12 @@ off_t file_offset(std::uint64_t offset) {
 InputFile::InputFile(std::filesystem::path path) : path_(std::move(path)) {
     // std::filesystem::path stores wchar_t on Windows, so the wide entry point takes it
     // directly and the artifact path keeps whatever characters the user's filesystem holds.
-    const HANDLE file = ::CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+    // POSIX open() places no lock on the file: another writer may rewrite, truncate or unlink
+    // it while this handle is alive, and callers rely on that (the artifact tests rewrite and
+    // resize a fixture while a Reader still holds it). CreateFileW denies every mode not named
+    // here, so all three have to be granted for the Windows handle to behave like the fd.
+    constexpr DWORD kShareAll = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    const HANDLE file = ::CreateFileW(path_.c_str(), GENERIC_READ, kShareAll, nullptr,
                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) { fail(path_, "open"); }
     fd_ = file;
@@ -140,8 +145,9 @@ std::size_t InputFile::read_direct(std::uint64_t offset, std::span<std::byte> de
         // use, and the caller's staging buffers are page-aligned, so the guard above is also
         // the check this flag needs.
         const HANDLE file =
-            ::CreateFileW(path_.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING, nullptr);
+            ::CreateFileW(path_.c_str(), GENERIC_READ,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_NO_BUFFERING, nullptr);
         if (file == INVALID_HANDLE_VALUE) { fail(path_, "open direct"); }
         direct_fd_ = file;
     }

@@ -6,7 +6,16 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <iostream>
 #include <utility>
+
+// CUDA fault injection here is built on the GNU linker's --wrap=symbol, which redirects every
+// call to cudaMalloc into __wrap_cudaMalloc and exposes the original as __real_cudaMalloc.
+// MSVC's link.exe has no equivalent. /ALTERNATENAME can satisfy the __real_ symbols, which
+// would make this file LINK on Windows while no call was ever redirected — the test would pass
+// having exercised nothing. Refusing to run is the honest outcome; see the Windows branch at
+// the bottom of this file.
+#if !defined(_MSC_VER)
 
 namespace {
 
@@ -143,3 +152,18 @@ void materialization_cuda_errors(DeviceContext& device) {
 }
 
 } // namespace ninfer::test
+
+#else // _MSC_VER
+
+namespace ninfer::test {
+
+void materialization_cuda_errors(DeviceContext&) {
+    std::cout << "SKIPPED materialization CUDA fault injection: requires the GNU linker's "
+                 "--wrap, which link.exe does not provide. Allocation, event and upload "
+                 "failure paths are NOT covered on this platform."
+              << std::endl;
+}
+
+} // namespace ninfer::test
+
+#endif // _MSC_VER

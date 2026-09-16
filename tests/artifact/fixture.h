@@ -150,6 +150,9 @@ struct Fixture {
             header[16]      = std::byte{0x71};
             const auto path = i == 0 ? entry : directory / record.at("path").get<std::string>();
             std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            // Name the file: setting the exception mask on an already-failed stream throws
+            // immediately, and "failbit set" alone does not say which path could not be opened.
+            require(file.is_open(), ("fixture cannot open " + path.string()).c_str());
             file.exceptions(std::ios::badbit | std::ios::failbit);
             file.write(reinterpret_cast<const char*>(header.data()), header.size());
             if (i == 0) { file.write(text.data(), static_cast<std::streamsize>(text.size())); }
