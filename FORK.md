@@ -16,24 +16,32 @@ measured is the build and the test suite:
 | | |
 |---|---|
 | configure / build / link | succeed, MSVC 19.44 + CUDA 13.2, `sm_120a` |
-| `ctest` | **119 of 121 pass** |
+| `ctest` | **120 of 121 pass** |
 
-### 🔴 Known defect that affects normal use
+The remaining failure is `ninfer_resource_manager_test`. It is **not** believed to be a port defect:
+the planner aborts its search when a wall-clock allowance is exhausted
+(`materialization_planner.h:168,198,291`), so a loaded machine gets the early, cheaper plan and the
+ranking assertion fails. The evidence is that the binary is byte-identical (unchanged mtime)
+between a run that passed and six consecutive runs that failed, so nothing in the code changed
+between the two outcomes. Settling it properly needs a comparison against the same commit on Linux.
 
-`ninfer_linear_nvfp4_a4_test` fails with `cudaErrorIllegalInstruction` on the NVFP4 W4A4 linear
-route at shape `[14336, 5120]` with **T = 1024**.
+### Fixed: the NVFP4 illegal instruction
 
-This is not a corner case:
+An earlier revision of this fork crashed with `cudaErrorIllegalInstruction` on the default NVFP4
+prefill path. **That is fixed** (`d48aa25b`) and the test passes. It is described here because
+anyone who cloned before that commit has the broken version, and because the cause is worth knowing
+if you are porting this yourself:
 
-* `14336x5120` is a registered production geometry (`src/ops/linear/nvfp4/nvfp4_geometry.h:29`),
-  the first entry in the NVFP4 dispatch table.
-* `prefill_chunk` **defaults to 1024** (`src/serve/serve_options.h:36`, `apps/cli/options.h:25`).
-* T = 1023 passes; T = 1024 fails.
+MSVC cannot take the `alignas(128)` TMA descriptors as a by-value kernel parameter (C2711), so the
+Windows path stages them in device memory. The staging copied from a **host stack local**. Under
+CUDA graph capture a memcpy becomes a graph node that records its *source address*, so every
+`cuGraphLaunch` replay re-read a dead stack frame and `cp.async.bulk.tensor` executed against a
+garbage tensormap. Upstream is immune: it passes the descriptors as a `__grid_constant__` by-value
+parameter, whose bytes are captured into the kernel node. Staging is now a pinned host mirror plus a
+persistent device buffer, both outliving any graph that holds them.
 
-So a prompt long enough to fill a default prefill chunk may hit this on the NVFP4 path — which is
-the reason this port exists. It is **not** known whether the same failure occurs on Linux at this
-commit; splitting that requires a Linux run of the same upstream base, which the author of this
-fork could not perform. Until that is settled, treat NVFP4 inference here as untrusted.
+This defect is present in the approach taken by upstream PR #233, from which this workaround was
+derived.
 
 ### Coverage removed on Windows
 
@@ -45,7 +53,7 @@ build says so at configure time and the test says so when it runs.
 
 ## What was changed, per Apache-2.0 §4(b)
 
-Base: upstream `5b4303c0`. Seven commits, 47 files, +894 / −99.
+Base: upstream `5b4303c0`. 9 commits; 48 files changed, 1010 insertions(+), 99 deletions(-).
 
 * **Build** — MSVC flags (`NOMINMAX`, `/utf-8`, `/Zc:preprocessor`), FFmpeg and libcurl resolved
   through vcpkg in manifest mode, `windows` and `windows-dev` CMake presets, UTF-8 application

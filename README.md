@@ -1,8 +1,8 @@
 > **⚠️ UNOFFICIAL WINDOWS FORK.** Upstream is
 > [Neroued/ninfer](https://github.com/Neroued/ninfer) (Apache-2.0); this fork only adds a native
-> Windows build and is not affiliated with or endorsed by that project. It carries a **known
-> defect on the default NVFP4 prefill path** and no model has been run end to end on it yet.
-> Read [FORK.md](FORK.md) before using it.
+> Windows build and is not affiliated with or endorsed by that project. 120 of 121 tests pass, but
+> **no model has been run end to end on it yet** — nobody has checked that it produces correct
+> tokens. Read [FORK.md](FORK.md) before using it.
 
 # NInfer
 
