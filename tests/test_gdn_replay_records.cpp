@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#if defined(_MSC_VER)
+#include <malloc.h>
+#endif
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -11,12 +14,23 @@
 
 namespace {
 
-using AlignedBacking = std::unique_ptr<void, decltype(&std::free)>;
+// MSVC has never implemented C11 std::aligned_alloc: its free() cannot release an
+// over-aligned block, so the allocator and the deleter have to be swapped together.
+// Getting only half of this right compiles and then corrupts the heap on release.
+#if defined(_MSC_VER)
+void aligned_release(void* data) noexcept { ::_aligned_free(data); }
+void* aligned_acquire(std::size_t bytes) { return ::_aligned_malloc(bytes, 256); }
+#else
+void aligned_release(void* data) noexcept { std::free(data); }
+void* aligned_acquire(std::size_t bytes) { return std::aligned_alloc(256, bytes); }
+#endif
+
+using AlignedBacking = std::unique_ptr<void, decltype(&aligned_release)>;
 
 AlignedBacking make_backing(std::size_t bytes) {
-    void* data = std::aligned_alloc(256, bytes);
+    void* data = aligned_acquire(bytes);
     if (data == nullptr) { throw std::bad_alloc(); }
-    return AlignedBacking(data, &std::free);
+    return AlignedBacking(data, &aligned_release);
 }
 
 int fail(const char* label) {

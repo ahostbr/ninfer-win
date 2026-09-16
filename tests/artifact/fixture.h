@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <random>
+#include <sstream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -46,12 +48,22 @@ struct Fixture {
     std::vector<std::byte> payload;
 
     Fixture() : payload(1344) {
-        auto pattern = (std::filesystem::temp_directory_path() / "ninfer-artifact-XXXXXX").string();
-        std::vector<char> buffer(pattern.begin(), pattern.end());
-        buffer.push_back('\0');
-        const char* path = ::mkdtemp(buffer.data());
-        if (!path) { throw std::runtime_error("cannot create fixture directory"); }
-        directory = path;
+        // Was ::mkdtemp, which is POSIX-only. create_directory reports false when the name
+        // already exists, so retrying on a fresh suffix gives the same collision safety
+        // without a platform branch.
+        std::random_device entropy;
+        for (int attempt = 0;; ++attempt) {
+            std::ostringstream name;
+            name << "ninfer-artifact-" << std::hex << entropy() << entropy();
+            auto candidate = std::filesystem::temp_directory_path() / name.str();
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                directory = std::move(candidate);
+                break;
+            }
+            if (error) { throw std::runtime_error("cannot create fixture directory"); }
+            if (attempt == 64) { throw std::runtime_error("cannot find a free fixture directory"); }
+        }
         entry     = directory / "model.ninfer";
         root      = {
             {"components",

@@ -7,6 +7,7 @@
 #include "ops/direct_bf16_weight.h"
 #include "ops/input_projection_test_common.h"
 
+#include <array>
 #include <cuda_runtime.h>
 
 #include <algorithm>
