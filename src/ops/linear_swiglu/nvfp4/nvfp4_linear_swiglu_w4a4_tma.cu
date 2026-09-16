@@ -81,27 +81,35 @@ void launch_nvfp4_linear_swiglu_w4a4_tma(const std::uint8_t* activation_codes,
     constexpr int kPairN = M256N128S3::kBlockN / 2;
     const dim3 grid((Geometry::kOutputRows / 2) / kPairN, tokens / M256N128S3::kBlockM);
 
-    // MSVC rejects over-aligned kernel parameters (C2711), so the descriptors are
-    // passed to the kernel by device pointer instead of by value on Windows only.
-    // cudaMallocAsync keeps the entire alloc-copy-launch-free cycle stream-ordered;
-    // the stream memory pool reuses the same slot on subsequent launches.
+    // MSVC rejects over-aligned kernel parameters (C2711), so the descriptors travel by device
+    // pointer on Windows only. Both the copy source and the destination must outlive any CUDA
+    // graph that captures this launch: a captured copy node records its source ADDRESS and
+    // re-reads it on every replay, so staging from the stack-local `descriptors` yields a garbage
+    // tensormap and an illegal instruction at cp.async.bulk.tensor. See the same reasoning in
+    // ops/linear/nvfp4/nvfp4_w4a4_tma.cu, where that failure was diagnosed.
 #if defined(_MSC_VER)
-    Nvfp4W4a4TmaDescriptors* device_descriptors = nullptr;
-    CUDA_CHECK(cudaMallocAsync(&device_descriptors, sizeof(Nvfp4W4a4TmaDescriptors), stream));
-    CUDA_CHECK(cudaMemcpyAsync(device_descriptors, &descriptors, sizeof(Nvfp4W4a4TmaDescriptors),
+    struct DescriptorStaging {
+        Nvfp4W4a4TmaDescriptors* device = nullptr;
+        Nvfp4W4a4TmaDescriptors* host   = nullptr;
+
+        DescriptorStaging() {
+            CUDA_CHECK(cudaMalloc(&device, sizeof(Nvfp4W4a4TmaDescriptors)));
+            CUDA_CHECK(cudaHostAlloc(&host, sizeof(Nvfp4W4a4TmaDescriptors), cudaHostAllocDefault));
+        }
+    };
+    static DescriptorStaging staging;
+    *staging.host = descriptors;
+    CUDA_CHECK(cudaMemcpyAsync(staging.device, staging.host, sizeof(Nvfp4W4a4TmaDescriptors),
                                cudaMemcpyHostToDevice, stream));
 #endif
 #if defined(_MSC_VER)
     nvfp4_linear_swiglu_w4a4_tma_kernel<Geometry, M256N128S3>
-        <<<grid, M256N128S3::kThreads, kSharedBytes, stream>>>(device_descriptors, alpha, output);
+        <<<grid, M256N128S3::kThreads, kSharedBytes, stream>>>(staging.device, alpha, output);
 #else
     nvfp4_linear_swiglu_w4a4_tma_kernel<Geometry, M256N128S3>
         <<<grid, M256N128S3::kThreads, kSharedBytes, stream>>>(descriptors, alpha, output);
 #endif
     CUDA_CHECK(cudaGetLastError());
-#if defined(_MSC_VER)
-    CUDA_CHECK(cudaFreeAsync(device_descriptors, stream));
-#endif
 }
 
 } // namespace ninfer::ops::detail

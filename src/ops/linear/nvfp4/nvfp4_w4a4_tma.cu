@@ -73,15 +73,36 @@ void launch_tma(const std::uint8_t* activation_codes, const std::uint8_t* activa
     (void)kConfigured;
 
 #if defined(_MSC_VER)
-    // MSVC cannot take the over-aligned descriptors as a by-value kernel parameter (C2711),
-    // so they are staged in device memory and passed by pointer. cudaMallocAsync keeps the
-    // alloc-copy-launch-free cycle stream-ordered and the stream pool reuses the same slot on
-    // subsequent launches.
-    // ponytail: one small H2D copy per launch on Windows; hoist into a per-stream scratch
-    // buffer if it ever shows up in a decode profile.
-    Nvfp4W4a4TmaDescriptors* device_descriptors = nullptr;
-    CUDA_CHECK(cudaMallocAsync(&device_descriptors, sizeof(Nvfp4W4a4TmaDescriptors), stream));
-    CUDA_CHECK(cudaMemcpyAsync(device_descriptors, &descriptors, sizeof(Nvfp4W4a4TmaDescriptors),
+    // MSVC cannot take the over-aligned descriptors as a by-value kernel parameter (C2711), so
+    // they are staged in device memory and passed by pointer.
+    //
+    // The staging must survive CUDA GRAPH CAPTURE, which is what makes this subtle. Under capture
+    // the copy becomes a graph node that records its SOURCE ADDRESS, and every replay re-reads
+    // that address. Staging from the stack-local `descriptors` therefore produced a node pointing
+    // at a dead frame: on cuGraphLaunch the tensormap read back as garbage and
+    // cp.async.bulk.tensor raised an illegal instruction. cudaMallocAsync/cudaFreeAsync around the
+    // launch had the matching problem on the device side. Both are replaced by allocations that
+    // outlive any graph holding them: a pinned host mirror as the copy source, and a device buffer
+    // that is never freed for the life of the process.
+    //
+    // The buffers are per template instantiation, so one launch configuration cannot overwrite
+    // another's descriptors. Two graphs capturing the SAME instantiation with different tensors
+    // would still share them; no route does that today, and the alternative is a pool keyed by
+    // content that nothing currently needs.
+    // ponytail: per-instantiation staging; key a pool by descriptor content if a second graph ever
+    // captures one instantiation with different tensors.
+    struct DescriptorStaging {
+        Nvfp4W4a4TmaDescriptors* device = nullptr;
+        Nvfp4W4a4TmaDescriptors* host   = nullptr;
+
+        DescriptorStaging() {
+            CUDA_CHECK(cudaMalloc(&device, sizeof(Nvfp4W4a4TmaDescriptors)));
+            CUDA_CHECK(cudaHostAlloc(&host, sizeof(Nvfp4W4a4TmaDescriptors), cudaHostAllocDefault));
+        }
+    };
+    static DescriptorStaging staging;
+    *staging.host = descriptors;
+    CUDA_CHECK(cudaMemcpyAsync(staging.device, staging.host, sizeof(Nvfp4W4a4TmaDescriptors),
                                cudaMemcpyHostToDevice, stream));
 #endif
 
@@ -90,15 +111,12 @@ void launch_tma(const std::uint8_t* activation_codes, const std::uint8_t* activa
                     (tokens + Schedule::kBlockM - 1) / Schedule::kBlockM);
 #if defined(_MSC_VER)
     nvfp4_w4a4_tma_kernel<Geometry, Schedule><<<grid, Schedule::kThreads, kSharedBytes, stream>>>(
-        device_descriptors, alpha, epilogue, output, tokens);
+        staging.device, alpha, epilogue, output, tokens);
 #else
     nvfp4_w4a4_tma_kernel<Geometry, Schedule><<<grid, Schedule::kThreads, kSharedBytes, stream>>>(
         descriptors, alpha, epilogue, output, tokens);
 #endif
     CUDA_CHECK(cudaGetLastError());
-#if defined(_MSC_VER)
-    CUDA_CHECK(cudaFreeAsync(device_descriptors, stream));
-#endif
 }
 
 template <class Geometry, class Schedule = TmaM256N128>
