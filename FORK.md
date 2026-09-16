@@ -18,12 +18,22 @@ measured is the build and the test suite:
 | configure / build / link | succeed, MSVC 19.44 + CUDA 13.2, `sm_120a` |
 | `ctest` | **120 of 121 pass** |
 
-The remaining failure is `ninfer_resource_manager_test`. It is **not** believed to be a port defect:
-the planner aborts its search when a wall-clock allowance is exhausted
-(`materialization_planner.h:168,198,291`), so a loaded machine gets the early, cheaper plan and the
-ranking assertion fails. The evidence is that the binary is byte-identical (unchanged mtime)
-between a run that passed and six consecutive runs that failed, so nothing in the code changed
-between the two outcomes. Settling it properly needs a comparison against the same commit on Linux.
+The remaining failure is `ninfer_resource_manager_test`, and its cause is **not established**.
+Treat it as an open Windows defect until someone shows otherwise.
+
+What is measured: it fails **17 consecutive runs**, both directly and through `ctest`, on an
+otherwise idle machine (3% CPU). It passed exactly once, during a full 121-test suite run. The
+binary is byte-identical across both outcomes (unchanged mtime), so nothing in the code differs —
+the single pass is the anomaly, not the failures.
+
+Two explanations were tested and **both are wrong**: it is not machine load (it fails when idle and
+passed when the machine was busy — the opposite of the guess), and it is not the invocation method
+(`ctest` and direct invocation both fail). The assertion that fails is a planner ranking check, and
+the planner does carry both a wall-clock allowance and a work budget
+(`materialization_planner.h:168,198,291`) that could plausibly make its output machine-dependent —
+but that is a hypothesis, not a finding, and the two hypotheses tested so far were both refuted.
+A run of the same assertion against the same upstream commit on Linux would settle whether this is
+specific to this fork.
 
 ### Fixed: the NVFP4 illegal instruction
 
