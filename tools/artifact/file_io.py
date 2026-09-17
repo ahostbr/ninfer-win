@@ -13,6 +13,11 @@ _PAGE_BYTES = mmap.PAGESIZE
 # posix_fadvise has no Windows equivalent. Dropping the hint costs page-cache residency, not
 # correctness — the writes and their ordering are unaffected — so the call becomes a no-op
 # rather than a platform branch at every call site.
+# Windows opens descriptors in TEXT mode by default, where byte 0x1A (Ctrl-Z) terminates a
+# read. Weight payloads are binary and contain 0x1A freely, so every os.open on a payload
+# must carry this flag. It does not exist on POSIX, where the distinction does not.
+O_BINARY = getattr(os, "O_BINARY", 0)
+
 _HAS_FADVISE = hasattr(os, "posix_fadvise")
 # Windows has no fdatasync. fsync is a superset: it also flushes metadata.
 _sync = getattr(os, "fdatasync", os.fsync)
