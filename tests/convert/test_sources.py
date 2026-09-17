@@ -78,3 +78,25 @@ def test_row_fp8_source_and_reordered_encoded_rows(tmp_path):
         words = reordered.read_encoded(0, 2)
         assert torch.equal(words.codes, codes.flip(0))
         assert torch.equal(words.scales, scales.flatten().flip(0))
+
+
+def test_payload_containing_ctrl_z_reads_whole_tensor(tmp_path):
+    """A descriptor opened in Windows TEXT mode stops at byte 0x1A, silently truncating.
+
+    Weight payloads are binary and contain 0x1A freely — the byte appears 40 bytes into the
+    first GDN conv1d tensor of Qwen3.5-0.8B, where a 49,152-byte read returned 40. Without
+    os.O_BINARY on the os.open in SafetensorsSource._file that surfaces as "short source read"
+    part-way through a conversion. This arm is RED on Windows without the flag; on POSIX the
+    mode does not exist and it simply passes.
+    """
+
+    rows, columns = 4, 64
+    flat = torch.arange(rows * columns, dtype=torch.int16)
+    flat[20] = 0x1A1A  # both bytes are Ctrl-Z, well before the end of the payload
+    weight = flat.view(rows, columns).view(torch.bfloat16)
+    save_file({"proj.weight": weight}, str(tmp_path / "model.safetensors"))
+
+    with SafetensorsSource(tmp_path) as store:
+        values = store.read_flat("proj.weight")
+        assert values.numel() == rows * columns
+        assert torch.equal(values.view(torch.int16), flat)
