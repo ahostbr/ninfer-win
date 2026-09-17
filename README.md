@@ -4,6 +4,19 @@
 > one model HAS now been run end to end — coherent output at 65.1 tok/s decode on an RTX 5090 — but
 > that is **one prompt on one artifact**, so treat this as lightly exercised rather than proven.
 > Read [FORK.md](FORK.md) before using it.
+>
+> **🔴 SUPPORTED HARDWARE: NVIDIA GeForce RTX 5090 ONLY.** Not "Blackwell", not "an NVIDIA GPU" —
+> the 5090. Two separate reasons, and a card has to clear BOTH:
+>
+> * **The binary contains one architecture.** It is compiled for `sm_120a` and the build refuses
+>   any other (`CMakeLists.txt`). Nothing else will run it, and there is no fallback path.
+> * **⚠️ `compute_cap 12.0` IS NOT ENOUGH, and this is the trap.** `sm_120` is the whole Blackwell
+>   consumer line: an **RTX 5080 also reports 12.0** and has 16 GB. The Qwen3.8-27B NVFP4 artifact
+>   needs **20.3 GiB of VRAM** (measured at 16k context) plus **~9.15 GiB of PINNED HOST RAM**
+>   (8.00 GiB host KV + 1.15 GiB pinned state, from the server's own startup log). A 5080 passes
+>   the architecture check, starts, and then fails the load.
+>
+> Other Blackwell cards are untested and unsupported. Anything older cannot run the binary at all.
 
 # NInfer
 
