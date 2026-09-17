@@ -8,32 +8,52 @@ maintainer, and no part of it has been submitted to or accepted by that project.
 Report engine bugs to upstream only if you can reproduce them on Linux. Anything that happens only
 on Windows belongs here.
 
-## Status: UNVERIFIED. Read this before you run it.
+## Status: the engine runs; treat it as lightly exercised.
 
-Nobody has yet run a real model end to end on this build and confirmed the output. What has been
-measured is the build and the test suite:
+**A model HAS now been run end to end on this build.** `qwen3.8-27b` NVFP4 on an RTX 5090:
+coherent output, clean stop-token finish, **65.1 tok/s decode** (340.1 prefill), first token ~67 ms
+after engine ready, 19.0 GiB of weights loaded in 4.5 s. `ninfer-serve` was then driven over HTTP —
+`/health`, `/v1/models`, a chat completion, a streamed completion and a tool-schema call all
+answered correctly.
+
+That is **six requests and one prompt on one artifact**. Concurrency, long contexts, prefix reuse,
+vision, `/v1/responses` and the Anthropic surface are all still unexercised here. It is no longer
+unverified; it is lightly exercised.
 
 | | |
 |---|---|
 | configure / build / link | succeed, MSVC 19.44 + CUDA 13.2, `sm_120a` |
-| `ctest` | **120 of 121 pass** |
+| `ctest` | **121 of 121 pass** |
+| one model, end to end | coherent, 65.1 tok/s decode on a 5090 |
 
-The remaining failure is `ninfer_resource_manager_test`, and its cause is **not established**.
-Treat it as an open Windows defect until someone shows otherwise.
+### Fixed: the planner test that was measuring the machine
 
-What is measured: it fails **17 consecutive runs**, both directly and through `ctest`, on an
-otherwise idle machine (3% CPU). It passed exactly once, during a full 121-test suite run. The
-binary is byte-identical across both outcomes (unchanged mtime), so nothing in the code differs —
-the single pass is the anomaly, not the failures.
+`ninfer_resource_manager_test` used to fail here — 20 consecutive runs on one unchanged binary,
+with a single pass hours earlier. **The cause is now established, and it was not what the earlier
+revision of this file guessed.**
 
-Two explanations were tested and **both are wrong**: it is not machine load (it fails when idle and
-passed when the machine was busy — the opposite of the guess), and it is not the invocation method
-(`ctest` and direct invocation both fail). The assertion that fails is a planner ranking check, and
-the planner does carry both a wall-clock allowance and a work budget
-(`materialization_planner.h:168,198,291`) that could plausibly make its output machine-dependent —
-but that is a hypothesis, not a finding, and the two hypotheses tested so far were both refuted.
-A run of the same assertion against the same upstream commit on Linux would settle whether this is
-specific to this fork.
+`test_candidate_search_prefers_deep_reuse_without_eviction` asserts WHICH plan the search returns.
+The search is bounded by budget gates that read the wall clock, so on a machine where the search
+executes more slowly the planner stops expanding sooner and returns a one-step eviction instead of
+the two-step preserving closure. The assertion was therefore a measurement of this machine's speed.
+
+Instrumented, every run reported `stop_reason = insufficient_expected_gain` with
+**`budget_exhausted = 0`** — the search was never cut off by the time budget, which is what rules
+out the obvious story. Raising the allowance from 50 ms to 60 s did **not** help and produced the
+*shallower* plan, which rules out "the budget is simply too small". What moves is the wall-clock
+terms *inside* the economic gates.
+
+The fix uses a seam the planner already had: `MaterializationPlanner` takes its clock as a template
+parameter, and `materialization_budget.h` says why — *"Integer timestamps make wall-budget decisions
+reproducible without sleeping in policy tests."* **No test in the file used it.** That one test now
+instantiates the planner with a frozen clock, so the search is bounded by its work limit alone.
+Measured: **20/20 failures before, 30/30 passes after.**
+
+⚠️ **What that gives up, said plainly:** with a real clock a slow enough machine genuinely does get
+the eviction plan, and that is the budget behaving as designed rather than a defect. This test no
+longer observes that behaviour. It was the wrong instrument for it — a test that fails on a slow
+machine and passes on a fast one reports the machine — but the behaviour is real and has no test of
+its own.
 
 ### Fixed: the NVFP4 illegal instruction
 

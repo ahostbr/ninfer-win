@@ -2167,8 +2167,53 @@ void test_machine_cost_changes_selection_without_changing_physical_assessment() 
             "machine cost policy changed physical assessment or failed to change selection");
 }
 
+/**
+ * A clock that never advances, for tests that assert WHICH PLAN the search
+ * returns.
+ *
+ * MaterializationPlanner takes its clock as a template parameter
+ * (`MaterializationPlanner<ModelContract, SearchClock = std::chrono::steady_clock>`)
+ * and materialization_budget.h says why: "Integer timestamps make wall-budget
+ * decisions reproducible without sleeping in policy tests." Until now NO test
+ * used that seam — every one took the real steady_clock — so every assertion
+ * about the CHOSEN plan was also an assertion about how fast this machine runs
+ * the search.
+ *
+ * 🔴 THAT IS NOT A THEORETICAL RISK. Measured on Windows/MSVC 2026-09-16 with
+ * the real clock, on one unchanged binary: 20 consecutive runs chose the
+ * one-step EVICTION plan, and a run minutes earlier chose the two-step
+ * PRESERVING plan. The stop reason was `insufficient_expected_gain` with
+ * `budget_exhausted = 0` every time — the search was never cut off by the time
+ * budget; it was the wall-clock TERMS inside the economic gates that moved.
+ * Raising the allowance 1200x (50 ms -> 60 s) did not help and produced the
+ * SHALLOWER plan, which is what rules out "the budget is simply too small".
+ *
+ * With time frozen, `elapsed` is always 0, so the budget's fast path admits
+ * every step whose cost fits the initial grant and the search is bounded by its
+ * WORK limit alone (`search_work >= work_limit` -> WorkBudget). The result
+ * becomes a property of the planner, which is what this test is about.
+ *
+ * ⚠️ WHAT THIS GIVES UP, SAID PLAINLY: with the real clock, a slow enough
+ * machine genuinely does get the eviction plan, and that is the budget working
+ * as designed rather than a defect. This test no longer observes that. It is
+ * the wrong instrument for it — a test that fails on a slow machine and passes
+ * on a fast one reports the machine, not the code — but the behaviour is real
+ * and deserves its own test with a clock that advances by a FIXED amount per
+ * call, which is not written.
+ */
+struct FrozenSearchClock {
+    using duration   = std::chrono::nanoseconds;
+    using rep        = duration::rep;
+    using period     = duration::period;
+    using time_point = std::chrono::time_point<FrozenSearchClock, duration>;
+    static constexpr bool is_steady = true;
+
+    static time_point now() noexcept { return time_point{duration{1'000'000'000}}; }
+};
+
 void test_candidate_search_prefers_deep_reuse_without_eviction() {
-    using Planner = ninfer::runtime::MaterializationPlanner<FakeModelContract>;
+    using Planner =
+        ninfer::runtime::MaterializationPlanner<FakeModelContract, FrozenSearchClock>;
 
     FakeProgram program;
     program.required_pressure_actions         = 2;
