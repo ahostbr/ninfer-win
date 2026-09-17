@@ -188,15 +188,10 @@ void causal_attention_small_t_k8v4_launch(
         .width         = width,
         .batch_size    = q.ne[3],
     };
-    if (q.ne[1] == CausalD256H24Kv4::QHeads) {
-        causal_attention_small_t_k8v4_launch_for<CausalD256H24Kv4>(
-            q, input, positions, scale, cache, invocation, envelope, partial_acc, partial_m,
-            partial_l, out, stream);
-        return;
-    }
-    causal_attention_small_t_k8v4_launch_for<CausalD256H16Kv2>(q, input, positions, scale, cache,
-                                                               invocation, envelope, partial_acc,
-                                                               partial_m, partial_l, out, stream);
+    dispatch_causal_geometry(q.ne[1], cache.num_kv_heads, [&](auto geometry) {
+        causal_attention_small_t_k8v4_launch_for<decltype(geometry)>(
+            q, input, positions, scale, cache, invocation, envelope, partial_acc, partial_m, partial_l, out, stream);
+    });
 }
 
 void causal_attention_cached_small_t_k8v4_launch(const Tensor& q, const Tensor& positions,
@@ -215,15 +210,10 @@ void causal_attention_cached_small_t_k8v4_launch(const Tensor& q, const Tensor& 
         .batch_size    = 1,
     };
     PagedKVBatchLayerView batch_cache = single_row_paged_kv_batch_view(cache);
-    if (q.ne[1] == CausalD256H24Kv4::QHeads) {
-        causal_attention_small_t_k8v4_launch_for<CausalD256H24Kv4>(
-            q, input, positions, scale, batch_cache, invocation, envelope, partial_acc, partial_m,
-            partial_l, out, stream);
-        return;
-    }
-    causal_attention_small_t_k8v4_launch_for<CausalD256H16Kv2>(
-        q, input, positions, scale, batch_cache, invocation, envelope, partial_acc, partial_m,
-        partial_l, out, stream);
+    dispatch_causal_geometry(q.ne[1], batch_cache.num_kv_heads, [&](auto geometry) {
+        causal_attention_small_t_k8v4_launch_for<decltype(geometry)>(
+            q, input, positions, scale, batch_cache, invocation, envelope, partial_acc, partial_m, partial_l, out, stream);
+    });
 }
 
 } // namespace ninfer::ops::detail

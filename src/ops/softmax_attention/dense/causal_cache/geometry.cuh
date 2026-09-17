@@ -2,6 +2,9 @@
 
 #include "ops/softmax_attention/common/head_mapping.cuh"
 
+#include <cstdint>
+#include <stdexcept>
+
 namespace ninfer::ops {
 
 template <int QHeadsValue, int KVHeadsValue, int SmallTSplitScaleValue>
@@ -14,28 +17,46 @@ struct CausalAttentionGeometry : AttentionHeadMapping<QHeadsValue, KVHeadsValue>
 
 using CausalD256H24Kv4 = CausalAttentionGeometry<24, 4, 1>;
 using CausalD256H16Kv2 = CausalAttentionGeometry<16, 2, 2>;
+// Qwen3.5-0.8B. SmallTSplitScale is 2, matching CausalD256H16Kv2 — its nearest neighbour by KV
+// head count — and NOT 4, which the (24,4)->1, (16,2)->2 progression invites. The consumers in
+// small_t.cu handle exactly the values 1 and 2: :48 is an `if constexpr (== 1)` special case and
+// :61 is the binary `SmallTSplitScale == 2 ? 17 : 24`, so a 4 would compile, pass the
+// `> 0` static_assert in CausalAttentionGeometry, and silently receive the scale-1 tuning.
+// Treat this as a value to sweep and measure, never to derive; going above 2 means extending
+// those two sites first.
+using CausalD256H8Kv2 = CausalAttentionGeometry<8, 2, 2>;
 
-// Most dispatch sites in this directory select a geometry from the QUERY head count alone and
-// reach the remaining one by unconditional fallthrough, e.g. prompt.cu:80-86:
+// Selecting a geometry from the QUERY head count alone and reaching the rest by unconditional
+// fallthrough — the shape every dispatch in this directory used to have — is unsafe for two
+// independent reasons, and only the first is caught by checking that QHeads are distinct:
 //
-//     if (q.ne[1] == CausalD256H24Kv4::QHeads) { launch_for<CausalD256H24Kv4>(...); return; }
-//     launch_for<CausalD256H16Kv2>(...);              // <- takes everything else
+//   1. COLLISION. Qwen3.5-9B/-4B are [D,Hq,Hkv] = [256,16,4]; QHeads 16 collides with
+//      CausalD256H16Kv2 and would execute with KVHeads = 2.
+//   2. A MISSING ARM. Even with pairwise-distinct QHeads, a fallthrough gives the LAST geometry
+//      everything it does not explicitly test. Adding CausalD256H8Kv2 (QHeads 8, distinct from
+//      24 and 16) to require_causal_geometry without touching the sites would have routed the
+//      0.8B straight into the CausalD256H16Kv2 arm. Distinctness is necessary and NOT sufficient.
 //
-// That is sound only while the registered geometries have PAIRWISE DISTINCT QHeads, which 24
-// and 16 are. It stops being sound the moment a geometry is added that collides on QHeads
-// while differing in KVHeads — Qwen3.5-9B and -4B are [D,Hq,Hkv] = [256,16,4], which collides
-// with CausalD256H16Kv2's 16 — because require_causal_geometry (causal_softmax_attention.cpp:37)
-// would admit it and the fallthrough would then execute it with KVHeads = 2. Wrong numerics, no
-// throw, no warning: the guard that would have objected is the one you just widened.
-//
-// So adding such a geometry must break the build HERE, not produce silent output at runtime.
-// When it does: give every dispatch in this directory the KV head count as well
-// (cache.num_kv_heads is in scope at each one) and make the final arm a throw rather than a
-// fallthrough — small_t.cu:225-252 already has that shape and is the model to copy.
-static_assert(CausalD256H24Kv4::QHeads != CausalD256H16Kv2::QHeads,
-              "registered causal geometries must be discriminable by QHeads alone, because the "
-              "dispatch sites in this directory select on QHeads and fall through. Before adding "
-              "a geometry that collides on QHeads, convert those sites to select on the "
-              "(QHeads, KVHeads) pair and to throw on no match.");
+// So the selection lives here, once, keyed on the (QHeads, KVHeads) PAIR, and ends in a throw
+// rather than a fallthrough. Adding a geometry means adding one line below and nothing else;
+// every call site is correct by construction. cache.num_kv_heads is in scope at each of them.
+template <class Launch>
+void dispatch_causal_geometry(std::int32_t query_heads, std::int32_t kv_heads, Launch&& launch) {
+    if (query_heads == CausalD256H24Kv4::QHeads && kv_heads == CausalD256H24Kv4::KVHeads) {
+        launch(CausalD256H24Kv4{});
+        return;
+    }
+    if (query_heads == CausalD256H16Kv2::QHeads && kv_heads == CausalD256H16Kv2::KVHeads) {
+        launch(CausalD256H16Kv2{});
+        return;
+    }
+    if (query_heads == CausalD256H8Kv2::QHeads && kv_heads == CausalD256H8Kv2::KVHeads) {
+        launch(CausalD256H8Kv2{});
+        return;
+    }
+    throw std::invalid_argument(
+        "causal attention: unsupported (QHeads, KVHeads); add the geometry to "
+        "dispatch_causal_geometry in geometry.cuh");
+}
 
 } // namespace ninfer::ops

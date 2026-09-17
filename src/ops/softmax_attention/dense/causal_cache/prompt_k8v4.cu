@@ -41,13 +41,9 @@ void causal_attention_prompt_k8v4_attention_dispatch(const Tensor& q, const Tens
                                                      float scale, const CacheView& cache,
                                                      Metadata metadata, Tensor& out,
                                                      cudaStream_t stream) {
-    if (q.ne[1] == CausalD256H24Kv4::QHeads) {
-        causal_attention_prompt_k8v4_attention_launch_for<CausalD256H24Kv4>(
-            q, positions, scale, cache, metadata, out, stream);
-        return;
-    }
-    causal_attention_prompt_k8v4_attention_launch_for<CausalD256H16Kv2>(q, positions, scale, cache,
-                                                                        metadata, out, stream);
+    dispatch_causal_geometry(q.ne[1], cache.num_kv_heads, [&](auto geometry) {
+        causal_attention_prompt_k8v4_attention_launch_for<decltype(geometry)>(q, positions, scale, cache, metadata, out, stream);
+    });
 }
 
 } // namespace

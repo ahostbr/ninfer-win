@@ -217,7 +217,9 @@ std::int32_t causal_attention_split_capacity(std::int32_t q_heads, std::int32_t 
                                              KvCacheStorage cache_storage,
                                              CausalAttentionExecutionEnvelope envelope,
                                              std::int32_t batch_size) {
-    if (tokens < 1 || tokens > (q_heads == 24 ? 8 : 6) || envelope.min_visible_keys == 0 ||
+    if (tokens < 1 || tokens > (q_heads == CausalD256H24Kv4::QHeads ? 8 : 6)  // NOTE: CausalD256H8Kv2 takes
+                                    // the 6 arm by inheritance, not by measurement — see
+                                    // the geometry.cuh note on SmallTSplitScale. UNTUNED. || envelope.min_visible_keys == 0 ||
         envelope.min_visible_keys > envelope.max_visible_keys) {
         throw std::invalid_argument("causal_softmax_attention split capacity: invalid profile");
     }
@@ -247,6 +249,9 @@ std::int32_t causal_attention_split_capacity(std::int32_t q_heads, std::int32_t 
     }
     if (q_heads == CausalD256H16Kv2::QHeads) {
         return causal_small_t_launch_capacity<CausalD256H16Kv2>(envelope, tokens, cache_storage);
+    }
+    if (q_heads == CausalD256H8Kv2::QHeads) {
+        return causal_small_t_launch_capacity<CausalD256H8Kv2>(envelope, tokens, cache_storage);
     }
     throw std::invalid_argument(
         "causal_softmax_attention split capacity: unsupported head geometry");
@@ -401,15 +406,10 @@ void causal_attention_small_t_launch(
         .width         = width,
         .batch_size    = q.ne[3],
     };
-    if (q.ne[1] == CausalD256H24Kv4::QHeads) {
-        causal_attention_small_t_launch_for<CausalD256H24Kv4>(q, input, pos, scale, cache,
-                                                              invocation, envelope, partial_acc,
-                                                              partial_m, partial_l, out, stream);
-        return;
-    }
-    causal_attention_small_t_launch_for<CausalD256H16Kv2>(q, input, pos, scale, cache, invocation,
-                                                          envelope, partial_acc, partial_m,
-                                                          partial_l, out, stream);
+    dispatch_causal_geometry(q.ne[1], cache.num_kv_heads, [&](auto geometry) {
+        causal_attention_small_t_launch_for<decltype(geometry)>(
+            q, input, pos, scale, cache, invocation, envelope, partial_acc, partial_m, partial_l, out, stream);
+    });
 }
 
 void causal_attention_cached_small_t_launch(const Tensor& q, const Tensor& pos, float scale,
@@ -442,15 +442,10 @@ void causal_attention_cached_small_t_launch(const Tensor& q, const Tensor& pos, 
         .batch_size    = 1,
     };
     const PagedKVBatchLayerView batch_cache = single_row_paged_kv_batch_view(cache);
-    if (q.ne[1] == CausalD256H24Kv4::QHeads) {
-        causal_attention_small_t_launch_for<CausalD256H24Kv4>(q, input, pos, scale, batch_cache,
-                                                              invocation, envelope, partial_acc,
-                                                              partial_m, partial_l, out, stream);
-        return;
-    }
-    causal_attention_small_t_launch_for<CausalD256H16Kv2>(q, input, pos, scale, batch_cache,
-                                                          invocation, envelope, partial_acc,
-                                                          partial_m, partial_l, out, stream);
+    dispatch_causal_geometry(q.ne[1], batch_cache.num_kv_heads, [&](auto geometry) {
+        causal_attention_small_t_launch_for<decltype(geometry)>(
+            q, input, pos, scale, batch_cache, invocation, envelope, partial_acc, partial_m, partial_l, out, stream);
+    });
 }
 
 } // namespace ninfer::ops::detail

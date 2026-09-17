@@ -36,11 +36,9 @@ void launch_for(const Tensor& q, const Tensor& positions, float scale, const Cac
 template <typename CacheView, typename Metadata>
 void dispatch(const Tensor& q, const Tensor& positions, float scale, const CacheView& cache,
               Metadata metadata, Tensor& out, cudaStream_t stream) {
-    if (q.ne[1] == CausalD256H24Kv4::QHeads) {
-        launch_for<CausalD256H24Kv4>(q, positions, scale, cache, metadata, out, stream);
-        return;
-    }
-    launch_for<CausalD256H16Kv2>(q, positions, scale, cache, metadata, out, stream);
+    dispatch_causal_geometry(q.ne[1], cache.num_kv_heads, [&](auto geometry) {
+        launch_for<decltype(geometry)>(q, positions, scale, cache, metadata, out, stream);
+    });
 }
 
 } // namespace
