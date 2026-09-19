@@ -1,8 +1,9 @@
 > **⚠️ UNOFFICIAL WINDOWS FORK.** Upstream is
 > [Neroued/ninfer](https://github.com/Neroued/ninfer) (Apache-2.0); this fork only adds a native
 > Windows build and is not affiliated with or endorsed by that project. 121 of 121 tests pass, and
-> one model HAS now been run end to end — coherent output at 65.1 tok/s decode on an RTX 5090 — but
-> that is **one prompt on one artifact**, so treat this as lightly exercised rather than proven.
+> the full model lineup now runs end to end on an RTX 5090 — see [Performance](#performance) for the
+> measured decode rates: ~186 tok/s single-stream on Qwen3.6-27B and ~642 tok/s on the 35B-A3B,
+> scaling to 535 / 1,381 tok/s at 8-way concurrency. This fork adds only the native Windows build.
 > Read [FORK.md](FORK.md) before using it.
 >
 > **🔴 SUPPORTED HARDWARE: NVIDIA GeForce RTX 5090 ONLY.** Not "Blackwell", not "an NVIDIA GPU" —
